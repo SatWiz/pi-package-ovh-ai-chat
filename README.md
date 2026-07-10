@@ -25,16 +25,16 @@ pi -e . --model ovhai/Mistral-7B-Instruct-v0.3
 
 | Model | Context | Reasoning | Images |
 |-------|---------|-----------|--------|
-| gpt-oss-120b | 131K | Yes | Yes |
-| gpt-oss-20b | 131K | Yes | Yes |
+| gpt-oss-120b | 131K | Yes | No |
+| gpt-oss-20b | 131K | Yes | No |
 | Meta-Llama-3_3-70B-Instruct | 131K | No | No |
 | Mistral-7B-Instruct-v0.3 | 65K | No | No |
 | Mistral-Nemo-Instruct-2407 | 65K | No | No |
-| Mistral-Small-3.2-24B-Instruct-2506 | 131K | No | No |
+| Mistral-Small-3.2-24B-Instruct-2506 | 131K | No | Yes |
 | Qwen3-32B | 32K | Yes | No |
-| Qwen3.5-9B | 262K | Yes | No |
-| Qwen3.5-397B-A17B | 262K | Yes | No |
-| Qwen3.6-27B | 262K | Yes | No |
+| Qwen3.5-9B | 262K | Yes | Yes |
+| Qwen3.5-397B-A17B | 262K | Yes | Yes |
+| Qwen3.6-27B | 262K | Yes | Yes |
 | Qwen3-Coder-30B-A3B-Instruct | 262K | Yes | No |
 | Qwen2.5-VL-72B-Instruct | 32K | No | Yes |
 
