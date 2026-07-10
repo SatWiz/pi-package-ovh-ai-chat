@@ -4,10 +4,10 @@
   "description": "Pi package for OVH AI Endpoints chat models",
   "type": "module",
   "license": "MIT",
-  "author": "S1M0N38",
+  "author": "SatWiz",
   "repository": {
     "type": "git",
-    "url": "https://github.com/shun/pi-package-ovh-ai-chat"
+    "url": "https://github.com/SatWiz/pi-package-ovh-ai-chat"
   },
   "keywords": [
     "pi-package",
