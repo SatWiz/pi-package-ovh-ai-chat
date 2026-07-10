@@ -1,0 +1,57 @@
+{
+  "name": "pi-package-ovh-ai-chat",
+  "version": "0.1.0",
+  "description": "Pi package for OVH AI Endpoints chat models",
+  "type": "module",
+  "license": "MIT",
+  "author": "S1M0N38",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shun/pi-package-ovh-ai-chat"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent"
+  ],
+  "files": [
+    "extensions",
+    "skills",
+    "prompts",
+    "themes",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "!.github"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "node --import jiti/register test/ovhai-models.test.ts",
+    "test:quick": "bash test/quick-test.sh",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.14",
+    "@earendil-works/pi-ai": "^0.74.0",
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "typebox": "^1.1.24",
+    "typescript": "^5.0.0"
+  }
+}
