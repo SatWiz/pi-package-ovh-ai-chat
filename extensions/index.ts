@@ -56,7 +56,7 @@ const REASONING_MODELS = new Set([
 ]);
 
 /** Models that support image input */
-const VISION_MODELS = new Set(["gpt-oss-120b", "gpt-oss-20b", "Qwen2.5-VL-72B-Instruct"]);
+const VISION_MODELS = new Set(["Qwen2.5-VL-72B-Instruct", "Qwen3.5-9B", "Qwen3.5-397B-A17B", "Qwen3.6-27B", "Mistral-Small-3.2-24B-Instruct-2506"]);
 
 /** Models to exclude (embeddings, audio, etc.) */
 const EXCLUDED_MODELS = new Set([
