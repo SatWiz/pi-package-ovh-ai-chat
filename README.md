@@ -42,6 +42,25 @@ pi -e . --model ovhai/Mistral-7B-Instruct-v0.3
 
 - **Base URL**: `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1`
 - **Auth**: Bearer token via `OVH_AI_TOKEN`
+- **API type**: `openai-completions` (default) or `openai-responses` via `OVH_AI_API`
+
+### Using the Responses API
+
+OVH AI Endpoints also supports the OpenAI Responses API at `/v1/responses`:
+
+```bash
+export OVH_AI_API="openai-responses"
+pi -e . --model ovhai/gpt-oss-120b
+```
+
+The extension normalizes pi's request payload for OVH's stricter `/v1/responses` backend:
+
+- Adds `type: "message"` to plain input items
+- Adds `status: "completed"` to `function_call_output` items (required by OVH, optional in OpenAI)
+- Adds `annotations: []` to `output_text` parts of replayed assistant messages
+- Removes unsupported params (`include`, `prompt_cache_key`, `prompt_cache_retention`, `reasoning.summary`)
+
+Basic text, reasoning, and tool calling all work with `gpt-oss-120b` and `Qwen3.6-27B`.
 
 ## Development
 

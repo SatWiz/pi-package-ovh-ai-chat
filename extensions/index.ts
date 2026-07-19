@@ -4,6 +4,11 @@
  * Provides access to OVHcloud AI Endpoints chat models through OpenAI-compatible API.
  * Models are fetched dynamically from the OVH catalog on startup.
  *
+ * Configuration:
+ * - OVH_AI_TOKEN: required API token
+ * - OVH_AI_BASE_URL: optional base URL override
+ * - OVH_AI_API: optional API type, "openai-completions" (default) or "openai-responses"
+ *
  * @see https://www.ovhcloud.com/en/public-cloud/ai-endpoints/
  * @see https://endpoints.ai.cloud.ovh.net/
  *
@@ -14,6 +19,7 @@
  * ```
  */
 
+import type { Api } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 
 /** Default OVH AI Endpoints base URL (Kepler region) */
@@ -21,6 +27,94 @@ const DEFAULT_BASE_URL = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1";
 
 /** Base URL for API calls. Override with OVH_AI_BASE_URL env var. */
 const BASE_URL = process.env.OVH_AI_BASE_URL ?? DEFAULT_BASE_URL;
+
+/** Default API type for OVH AI Endpoints. */
+const DEFAULT_API_TYPE: Api = "openai-completions";
+
+/** Allowed API type values for OVH_AI_API. */
+const ALLOWED_API_TYPES: readonly Api[] = ["openai-completions", "openai-responses"];
+
+/** API type for provider. Override with OVH_AI_API env var. */
+const API_TYPE = resolveApiType();
+
+/**
+ * Normalize OpenAI Responses payload for OVH AI Endpoints compatibility.
+ *
+ * OVH's /v1/responses backend is stricter than OpenAI's. Verified quirks:
+ * - Plain role-based input items need an explicit `type: "message"`.
+ * - `function_call_output` items need `status: "completed"`.
+ * - `output_text` parts of replayed assistant messages need `annotations`.
+ * - Unsupported top-level params must be removed (`include`, `prompt_cache_key`,
+ *   `prompt_cache_retention`), and `reasoning.summary` is not supported.
+ */
+function normalizeOvhResponsesPayload(payload: unknown): unknown {
+  const p = payload as Record<string, unknown>;
+  const {
+    include: _include,
+    prompt_cache_key: _key,
+    prompt_cache_retention: _retention,
+    ...rest
+  } = p;
+
+  if (Array.isArray(rest.input)) {
+    rest.input = (rest.input as Array<Record<string, unknown>>).map((item) => {
+      const type = item.type as string | undefined;
+
+      // OVH requires `status` on function_call_output items.
+      if (type === "function_call_output" && item.status === undefined) {
+        return { ...item, status: "completed" };
+      }
+
+      // Plain role-based items need an explicit `type: "message"`.
+      if (type === undefined && typeof item.role === "string") {
+        return { ...item, type: "message" };
+      }
+
+      // Replayed assistant messages: `output_text` parts need `annotations`.
+      if (type === "message" && item.role === "assistant" && Array.isArray(item.content)) {
+        return {
+          ...item,
+          content: (item.content as unknown[]).map((part) => {
+            const c = part as Record<string, unknown>;
+            if (c.type === "output_text" && c.annotations === undefined) {
+              return { ...c, annotations: [] };
+            }
+            return part;
+          }),
+        };
+      }
+
+      return item;
+    });
+  }
+
+  if (typeof rest.reasoning === "object" && rest.reasoning !== null) {
+    const reasoning = rest.reasoning as Record<string, unknown>;
+    const { summary: _summary, ...reasoningRest } = reasoning;
+    rest.reasoning = reasoningRest;
+  }
+
+  return rest;
+}
+
+/**
+ * Resolve API type from OVH_AI_API environment variable.
+ * Defaults to openai-completions.
+ */
+function resolveApiType(): Api {
+  const envApi = process.env.OVH_AI_API;
+  if (!envApi) {
+    return DEFAULT_API_TYPE;
+  }
+  if (!ALLOWED_API_TYPES.includes(envApi as Api)) {
+    throw new Error(
+      `Invalid OVH_AI_API value: "${envApi}".\n` +
+        `Allowed values: ${ALLOWED_API_TYPES.join(", ")}\n` +
+        `Example: export OVH_AI_API="openai-responses"`,
+    );
+  }
+  return envApi as Api;
+}
 
 /** OVH API model response shape */
 interface OvhaiApiModel {
@@ -56,7 +150,13 @@ const REASONING_MODELS = new Set([
 ]);
 
 /** Models that support image input */
-const VISION_MODELS = new Set(["Qwen2.5-VL-72B-Instruct", "Qwen3.5-9B", "Qwen3.5-397B-A17B", "Qwen3.6-27B", "Mistral-Small-3.2-24B-Instruct-2506"]);
+const VISION_MODELS = new Set([
+  "Qwen2.5-VL-72B-Instruct",
+  "Qwen3.5-9B",
+  "Qwen3.5-397B-A17B",
+  "Qwen3.6-27B",
+  "Mistral-Small-3.2-24B-Instruct-2506",
+]);
 
 /** Models to exclude (embeddings, audio, etc.) */
 const EXCLUDED_MODELS = new Set([
@@ -132,6 +232,7 @@ function mapModel(apiModel: OvhaiApiModel): ProviderModelConfig | null {
     },
     contextWindow: apiModel.context_length ?? 32768,
     maxTokens: apiModel.max_completion_tokens ?? 32768,
+    compat: API_TYPE === "openai-responses" ? { supportsDeveloperRole: false } : undefined,
   };
 }
 
@@ -207,8 +308,19 @@ export default async function (pi: ExtensionAPI) {
     name: "OVH AI Endpoints",
     baseUrl: BASE_URL,
     apiKey: "$OVH_AI_TOKEN",
-    api: "openai-completions",
+    api: API_TYPE,
     authHeader: true,
     models,
   });
+
+  // OVH's Responses API requires explicit `type: "message"` on input items.
+  if (API_TYPE === "openai-responses") {
+    pi.on("before_provider_request", (event, ctx) => {
+      const model = ctx.model;
+      if (model?.provider !== "ovhai" || model?.api !== "openai-responses") {
+        return;
+      }
+      return normalizeOvhResponsesPayload(event.payload);
+    });
+  }
 }
