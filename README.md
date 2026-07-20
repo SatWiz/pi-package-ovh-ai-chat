@@ -55,12 +55,30 @@ pi -e . --model ovhai/gpt-oss-120b
 
 The extension normalizes pi's request payload for OVH's stricter `/v1/responses` backend:
 
+- Forces `store: false` because OVH does not manage statefulness for `/v1/responses` (the OpenAI spec defaults to `store: true`)
 - Adds `type: "message"` to plain input items
 - Adds `status: "completed"` to `function_call_output` items (required by OVH, optional in OpenAI)
 - Adds `annotations: []` to `output_text` parts of replayed assistant messages
-- Removes unsupported params (`include`, `prompt_cache_key`, `prompt_cache_retention`, `reasoning.summary`)
+- Converts remote image URLs and local file paths in `input_image` parts to base64 data URLs (ready for when OVH's Responses API accepts them)
+- Removes unsupported top-level params (`include`, `prompt_cache_key`, `prompt_cache_retention`, `stream_options`, `user`, `service_tier`, `truncation`, `max_tool_calls`, `background`, `safety_identifier`, `verbosity`)
+- Strips `reasoning.summary` because reasoning summaries are not supported
 
-Basic text, reasoning, and tool calling all work with `gpt-oss-120b` and `Qwen3.6-27B`.
+Basic text, streaming, reasoning, structured outputs, and tool calling all work with `gpt-oss-120b` and `Qwen3.6-27B`.
+
+> **⚠️ Vision / image inputs limitation:** OVH's `/v1/responses` backend currently rejects `input_image` items with HTTP 422, even though the documentation includes a vision example. For vision tasks, use `OVH_AI_API=openai-completions` instead:
+>
+> ```bash
+> export OVH_AI_API="openai-completions"
+> pi -e . --model ovhai/Qwen3.5-9B
+> ```
+
+### References
+
+- [OVH AI Endpoints - Responses API](https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-responses-api)
+- [OVH AI Endpoints - Capabilities and Limitations](https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-capabilities)
+- [OVH AI Endpoints - Function Calling](https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-function-calling)
+- [OVH AI Endpoints - Structured Outputs](https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-structured-output)
+- [OVH AI Endpoints - Batch Mode](https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-batch-mode)
 
 ## Development
 
