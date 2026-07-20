@@ -11,6 +11,10 @@
  *
  * @see https://www.ovhcloud.com/en/public-cloud/ai-endpoints/
  * @see https://endpoints.ai.cloud.ovh.net/
+ * @see https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-responses-api
+ * @see https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-capabilities
+ * @see https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-function-calling
+ * @see https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-structured-output
  *
  * @example
  * ```bash
@@ -19,8 +23,13 @@
  * ```
  */
 
+import { appendFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import type { Api } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+
+/** Debug log file path for troubleshooting OVH request normalization. */
+const DEBUG_LOG_FILE = `${process.cwd()}/ovh-ai-debug.log`;
 
 /** Default OVH AI Endpoints base URL (Kepler region) */
 const DEFAULT_BASE_URL = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1";
@@ -37,61 +46,200 @@ const ALLOWED_API_TYPES: readonly Api[] = ["openai-completions", "openai-respons
 /** API type for provider. Override with OVH_AI_API env var. */
 const API_TYPE = resolveApiType();
 
+/** Maximum image size (bytes) to embed as base64 before warning about payload limits. */
+const MAX_IMAGE_SIZE_BYTES = 9 * 1024 * 1024;
+
+/**
+ * Fetch a remote image and return it as a base64 data URL.
+ *
+ * OVH AI Endpoints does not support remote image URLs for `input_image`;
+ * images must be provided as base64 data URLs. This helper downloads the
+ * image and converts it.
+ *
+ * @see https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-responses-api
+ */
+async function fetchImageAsDataUrl(imageUrl: string): Promise<string> {
+  const response = await fetch(imageUrl, {
+    headers: {
+      "User-Agent": "pi-ovh-ai-chat/1.0",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch image for OVH vision input: ${response.status} ${response.statusText} (${imageUrl})`,
+    );
+  }
+
+  const contentType = response.headers.get("content-type") ?? guessMimeType(imageUrl);
+  const buffer = await response.arrayBuffer();
+
+  return encodeImageBuffer(Buffer.from(buffer), contentType, imageUrl);
+}
+
+/**
+ * Read a local image file and return it as a base64 data URL.
+ */
+async function readLocalImageAsDataUrl(filePath: string): Promise<string> {
+  const resolvedPath = filePath.startsWith("file://") ? filePath.slice(7) : filePath;
+  const buffer = await readFile(resolvedPath);
+  const contentType = guessMimeType(resolvedPath);
+  return encodeImageBuffer(buffer, contentType, filePath);
+}
+
+/**
+ * Encode an image buffer as a base64 data URL, enforcing size limits.
+ */
+function encodeImageBuffer(buffer: Buffer, contentType: string, source: string): string {
+  if (buffer.byteLength > MAX_IMAGE_SIZE_BYTES) {
+    throw new Error(
+      `Image too large for OVH vision input: ${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB ` +
+        `(max ${(MAX_IMAGE_SIZE_BYTES / 1024 / 1024).toFixed(0)} MB). Source: ${source}`,
+    );
+  }
+
+  const base64 = buffer.toString("base64");
+  return `data:${contentType};base64,${base64}`;
+}
+
+/**
+ * Guess MIME type from a URL path when the server does not provide one.
+ */
+function guessMimeType(url: string): string {
+  const lower = url.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
+  return "image/jpeg";
+}
+
+/**
+ * Returns true if the given string looks like a remote HTTP(S) URL.
+ */
+function isRemoteImageUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value) && !value.startsWith("data:");
+}
+
+/**
+ * Returns true if the given string looks like a local file path or file:// URL.
+ */
+function isLocalImagePath(value: string): boolean {
+  return (
+    value.startsWith("file://") || (!value.startsWith("data:") && !/^https?:\/\//i.test(value))
+  );
+}
+
 /**
  * Normalize OpenAI Responses payload for OVH AI Endpoints compatibility.
  *
  * OVH's /v1/responses backend is stricter than OpenAI's. Verified quirks:
+ * - Statefulness is not managed; always send `store: false`.
  * - Plain role-based input items need an explicit `type: "message"`.
  * - `function_call_output` items need `status: "completed"`.
  * - `output_text` parts of replayed assistant messages need `annotations`.
+ * - Image inputs must be base64 data URLs; remote HTTP(S) URLs are not supported.
  * - Unsupported top-level params must be removed (`include`, `prompt_cache_key`,
- *   `prompt_cache_retention`), and `reasoning.summary` is not supported.
+ *   `prompt_cache_retention`, `stream_options`, `user`, `service_tier`, `truncation`,
+ *   `max_tool_calls`, `background`, `safety_identifier`, `verbosity`), and
+ *   `reasoning.summary` is not supported.
+ *
+ * @see https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-responses-api
  */
-function normalizeOvhResponsesPayload(payload: unknown): unknown {
+async function normalizeOvhResponsesPayload(payload: unknown): Promise<unknown> {
   const p = payload as Record<string, unknown>;
   const {
     include: _include,
     prompt_cache_key: _key,
     prompt_cache_retention: _retention,
+    background: _background,
+    max_tool_calls: _maxToolCalls,
+    truncation: _truncation,
+    safety_identifier: _safetyIdentifier,
+    service_tier: _serviceTier,
+    stream_options: _streamOptions,
+    user: _user,
+    verbosity: _verbosity,
     ...rest
   } = p;
 
+  // OVH does not manage statefulness for /v1/responses; OpenAI defaults to store: true,
+  // so force store: false to avoid unexpected behaviour.
+  if (rest.store !== false) {
+    rest.store = false;
+  }
+
   if (Array.isArray(rest.input)) {
-    rest.input = (rest.input as Array<Record<string, unknown>>).map((item) => {
-      const type = item.type as string | undefined;
+    rest.input = await Promise.all(
+      (rest.input as Array<Record<string, unknown>>).map(async (item) => {
+        const type = item.type as string | undefined;
 
-      // OVH requires `status` on function_call_output items.
-      if (type === "function_call_output" && item.status === undefined) {
-        return { ...item, status: "completed" };
-      }
+        // OVH requires `status` on function_call_output items.
+        if (type === "function_call_output" && item.status === undefined) {
+          return { ...item, status: "completed" };
+        }
 
-      // Plain role-based items need an explicit `type: "message"`.
-      if (type === undefined && typeof item.role === "string") {
-        return { ...item, type: "message" };
-      }
+        // Plain role-based items need an explicit `type: "message"`.
+        if (type === undefined && typeof item.role === "string") {
+          return { ...item, type: "message" };
+        }
 
-      // Replayed assistant messages: `output_text` parts need `annotations`.
-      if (type === "message" && item.role === "assistant" && Array.isArray(item.content)) {
-        return {
-          ...item,
-          content: (item.content as unknown[]).map((part) => {
-            const c = part as Record<string, unknown>;
-            if (c.type === "output_text" && c.annotations === undefined) {
-              return { ...c, annotations: [] };
-            }
-            return part;
-          }),
-        };
-      }
+        // Replayed assistant messages: `output_text` parts need `annotations`.
+        if (type === "message" && item.role === "assistant" && Array.isArray(item.content)) {
+          return {
+            ...item,
+            content: (item.content as unknown[]).map((part) => {
+              const c = part as Record<string, unknown>;
+              if (c.type === "output_text" && c.annotations === undefined) {
+                return { ...c, annotations: [] };
+              }
+              return part;
+            }),
+          };
+        }
 
-      return item;
-    });
+        // Convert remote/local image URLs to base64 data URLs for OVH vision inputs.
+        if (type === "input_image" && typeof item.image_url === "string") {
+          if (isRemoteImageUrl(item.image_url)) {
+            return { ...item, image_url: await fetchImageAsDataUrl(item.image_url) };
+          }
+          if (isLocalImagePath(item.image_url)) {
+            return { ...item, image_url: await readLocalImageAsDataUrl(item.image_url) };
+          }
+        }
+
+        if (type === "message" && item.role === "user" && Array.isArray(item.content)) {
+          const normalizedContent = await Promise.all(
+            (item.content as Array<Record<string, unknown>>).map(async (part) => {
+              if (part.type === "input_image" && typeof part.image_url === "string") {
+                if (isRemoteImageUrl(part.image_url)) {
+                  return { ...part, image_url: await fetchImageAsDataUrl(part.image_url) };
+                }
+                if (isLocalImagePath(part.image_url)) {
+                  return { ...part, image_url: await readLocalImageAsDataUrl(part.image_url) };
+                }
+              }
+              return part;
+            }),
+          );
+          return { ...item, content: normalizedContent };
+        }
+
+        return item;
+      }),
+    );
   }
 
   if (typeof rest.reasoning === "object" && rest.reasoning !== null) {
     const reasoning = rest.reasoning as Record<string, unknown>;
     const { summary: _summary, ...reasoningRest } = reasoning;
     rest.reasoning = reasoningRest;
+  }
+
+  // previous_response_id is also unsupported on OVH, but Pi does not send it by
+  // default when store is false. Keep it explicit here for safety.
+  if (rest.previous_response_id !== undefined) {
+    delete rest.previous_response_id;
   }
 
   return rest;
@@ -313,13 +461,38 @@ export default async function (pi: ExtensionAPI) {
     models,
   });
 
-  // OVH's Responses API requires explicit `type: "message"` on input items.
+  // OVH's Responses API requires explicit `type: "message"` on input items
+  // and remote image URLs must be converted to base64 data URLs.
   if (API_TYPE === "openai-responses") {
-    pi.on("before_provider_request", (event, ctx) => {
+    pi.on("before_provider_request", async (event, ctx) => {
       const model = ctx.model;
       if (model?.provider !== "ovhai" || model?.api !== "openai-responses") {
         return;
       }
+      const input = (event.payload as Record<string, unknown>).input;
+      const hasImage =
+        Array.isArray(input) &&
+        input.some((item) =>
+          Array.isArray(item.content)
+            ? item.content.some((part: Record<string, unknown>) => part.type === "input_image")
+            : item.type === "input_image",
+        );
+
+      // OVH's /v1/responses backend currently rejects input_image items (422), even though
+      // the documentation shows an example. Log payloads for diagnostics and warn users.
+      if (hasImage) {
+        const timestamp = new Date().toISOString();
+        appendFileSync(
+          DEBUG_LOG_FILE,
+          `[${timestamp}] [OVH DEBUG] image payload input:\n${JSON.stringify(input, null, 2)}\n\n`,
+        );
+        console.error(
+          "[OVH AI Warning] Image input detected for /v1/responses. " +
+            "OVH's Responses API currently rejects image inputs (HTTP 422). " +
+            "Use OVH_AI_API=openai-completions for vision tasks.",
+        );
+      }
+
       return normalizeOvhResponsesPayload(event.payload);
     });
   }
