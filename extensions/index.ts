@@ -25,7 +25,7 @@
 
 import { appendFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import type { Api } from "@earendil-works/pi-ai";
+import type { Api, RefreshModelsContext } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 
 /** Debug log file path for troubleshooting OVH request normalization. */
@@ -320,16 +320,20 @@ const EXCLUDED_MODELS = new Set([
 
 /**
  * Validates that required environment variable is set.
- * Throws helpful error if OVH_AI_TOKEN is missing.
+ * Logs a helpful warning instead of throwing so the extension still registers
+ * for new users who have not yet configured their token.
  */
-function validateConfig(): void {
+function validateConfig(): boolean {
   if (!process.env.OVH_AI_TOKEN) {
-    throw new Error(
-      "OVH_AI_TOKEN environment variable is not set.\n" +
+    console.error(
+      "[OVH AI] OVH_AI_TOKEN environment variable is not set.\n" +
         "Get your token from https://endpoints.ai.cloud.ovh.net/\n" +
-        "Then run: export OVH_AI_TOKEN='your-token-here'",
+        "Then run: export OVH_AI_TOKEN='your-token-here'\n" +
+        "Or use `/login ovhai` in pi to store a credential.",
     );
+    return false;
   }
+  return true;
 }
 
 /**
@@ -436,18 +440,28 @@ async function fetchModels(token: string): Promise<ProviderModelConfig[]> {
  * @param pi - Pi Extension API
  */
 export default async function (pi: ExtensionAPI) {
-  // Validate configuration at load time
-  validateConfig();
+  // Validate configuration at load time, but do not block extension registration
+  // so new users can install the extension and authenticate afterward.
+  const configured = validateConfig();
 
-  // Token is guaranteed to exist after validateConfig()
-  const token = process.env.OVH_AI_TOKEN as string;
-
-  // Fetch models from OVH API
-  const models = await fetchModels(token);
+  // Fetch models from OVH API when a token is available.
+  let models: ProviderModelConfig[] = [];
+  if (configured && process.env.OVH_AI_TOKEN) {
+    try {
+      models = await fetchModels(process.env.OVH_AI_TOKEN);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[OVH AI] Failed to fetch initial model catalog: ${message}\n` +
+          "[OVH AI] The provider is registered with an empty catalog; " +
+          "run `/model` refresh or `pi update --models` after configuring your token.",
+      );
+    }
+  }
 
   if (models.length === 0) {
-    throw new Error(
-      "No chat models available from OVH AI Endpoints. " +
+    console.error(
+      "[OVH AI] No chat models available from OVH AI Endpoints. " +
         "Check your token permissions or OVH account status.",
     );
   }
@@ -459,6 +473,39 @@ export default async function (pi: ExtensionAPI) {
     api: API_TYPE,
     authHeader: true,
     models,
+    /**
+     * Dynamic model refresh. Called during startup, `/model` refresh, and
+     * `pi update --models`. Re-fetches the OVH catalog so newly available
+     * models appear without restarting pi.
+     */
+    async refreshModels(context: RefreshModelsContext): Promise<ProviderModelConfig[]> {
+      if (!context.allowNetwork || context.signal?.aborted) {
+        return models;
+      }
+
+      const refreshToken =
+        context.credential?.type === "api_key" ? context.credential.key : process.env.OVH_AI_TOKEN;
+
+      if (!refreshToken) {
+        console.error("[OVH AI] Cannot refresh models: OVH_AI_TOKEN is not configured.");
+        return models;
+      }
+
+      try {
+        const refreshed = await fetchModels(refreshToken);
+        if (refreshed.length === 0) {
+          console.error(
+            "[OVH AI] Model refresh returned no chat models; keeping existing catalog.",
+          );
+          return models;
+        }
+        return refreshed;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[OVH AI] Model refresh failed: ${message}`);
+        return models;
+      }
+    },
   });
 
   // OVH's Responses API requires explicit `type: "message"` on input items

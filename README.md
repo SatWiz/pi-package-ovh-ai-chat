@@ -2,18 +2,33 @@
 
 Pi provider for [OVHcloud AI Endpoints](https://www.ovhcloud.com/en/public-cloud/ai-endpoints/) chat models.
 
+## Requirements
+
+- Pi coding agent **0.81.0 or newer** (uses the dynamic provider refresh API introduced in 0.81.0).
+
 ## Setup
+
+You need an OVHcloud AI Endpoints token. Get one from [endpoints.ai.cloud.ovh.net](https://endpoints.ai.cloud.ovh.net/).
+
+### Option 1: Environment variable
 
 ```bash
 export OVH_AI_TOKEN="your-token"
 ```
 
-Get your token from [endpoints.ai.cloud.ovh.net](https://endpoints.ai.cloud.ovh.net/).
+### Option 2: Pi stored credential
+
+```bash
+pi -e .
+# then run: /login ovhai
+```
+
+The extension registers itself even when no token is configured, so you can install it first and authenticate afterward.
 
 ## Usage
 
 ```bash
-# List models
+# List models (populated dynamically from OVH)
 pi -e . --list-models | grep ovhai
 
 # Use a model
@@ -21,7 +36,19 @@ pi -e . --model ovhai/gpt-oss-120b
 pi -e . --model ovhai/Mistral-7B-Instruct-v0.3
 ```
 
+## Dynamic Model Catalog
+
+The extension fetches the model catalog from OVH AI Endpoints when:
+
+- Pi starts (if `OVH_AI_TOKEN` is configured)
+- You run `/model` refresh in interactive mode
+- You run `pi update --models`
+
+If the catalog cannot be fetched — for example, because the token is missing, expired, or OVH is unreachable — the provider is still registered with an empty catalog and a warning is printed. Once you configure a valid token, the next refresh populates the model list automatically; no extension reload is required.
+
 ## Models
+
+The provider exposes whatever chat models OVH AI Endpoints returns for your account. The table below shows commonly available models at the time of writing; the actual list is fetched dynamically and may differ.
 
 | Model | Context | Reasoning | Images |
 |-------|---------|-----------|--------|
