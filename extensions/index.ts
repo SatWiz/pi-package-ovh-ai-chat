@@ -308,6 +308,13 @@ const REASONING_MODELS = new Set([
   "Qwen3-Coder-30B-A3B-Instruct",
 ]);
 
+/**
+ * Models whose OVH backend rejects the `reasoning_effort` parameter
+ * (HTTP 400, verified 2026-08-01 for Qwen3-Coder-30B-A3B-Instruct on
+ * /v1/chat/completions). pi must not send reasoning_effort for these.
+ */
+const NO_REASONING_EFFORT_MODELS = new Set(["Qwen3-Coder-30B-A3B-Instruct"]);
+
 /** Models that support image input */
 const VISION_MODELS = new Set([
   "Qwen2.5-VL-72B-Instruct",
@@ -395,7 +402,12 @@ function mapModel(apiModel: OvhaiApiModel): ProviderModelConfig | null {
     },
     contextWindow: apiModel.context_length ?? 32768,
     maxTokens: apiModel.max_completion_tokens ?? 32768,
-    compat: API_TYPE === "openai-responses" ? { supportsDeveloperRole: false } : undefined,
+    compat: (() => {
+      const compat: Record<string, boolean> = {};
+      if (API_TYPE === "openai-responses") compat.supportsDeveloperRole = false;
+      if (NO_REASONING_EFFORT_MODELS.has(apiModel.id)) compat.supportsReasoningEffort = false;
+      return Object.keys(compat).length > 0 ? compat : undefined;
+    })(),
   };
 }
 
