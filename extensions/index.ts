@@ -137,6 +137,7 @@ function isLocalImagePath(value: string): boolean {
  * - Statefulness is not managed; always send `store: false`.
  * - Plain role-based input items need an explicit `type: "message"`.
  * - `function_call_output` items need `status: "completed"`.
+ * - Function tools need an explicit `strict` field (defaults to `false`).
  * - `output_text` parts of replayed assistant messages need `annotations`.
  * - Image inputs must be base64 data URLs; remote HTTP(S) URLs are not supported.
  * - Unsupported top-level params must be removed (`include`, `prompt_cache_key`,
@@ -167,6 +168,16 @@ async function normalizeOvhResponsesPayload(payload: unknown): Promise<unknown> 
   // so force store: false to avoid unexpected behaviour.
   if (rest.store !== false) {
     rest.store = false;
+  }
+
+  // OVH requires an explicit `strict` field on function tools
+  // (422: "tools[0]: missing field `strict`"). Default to false; preserve explicit values.
+  if (Array.isArray(rest.tools)) {
+    rest.tools = (rest.tools as Array<Record<string, unknown>>).map((tool) =>
+      tool && tool.type === "function" && tool.strict === undefined
+        ? { ...tool, strict: false }
+        : tool,
+    );
   }
 
   if (Array.isArray(rest.input)) {
