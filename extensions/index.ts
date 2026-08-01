@@ -305,7 +305,9 @@ const REASONING_MODELS = new Set([
   "Qwen3.5-9B",
   "Qwen3.5-397B-A17B",
   "Qwen3.6-27B",
-  "Qwen3-Coder-30B-A3B-Instruct",
+  // NOTE: Qwen3-Coder-30B-A3B-Instruct is reasoning-capable upstream, but
+  // OVH's serving of it rejects both reasoning_effort (completions, 400) and
+  // reasoning: {effort} (responses, 400). Treated as non-reasoning here.
 ]);
 
 /**
