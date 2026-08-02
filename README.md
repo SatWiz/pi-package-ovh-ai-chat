@@ -69,7 +69,7 @@ The provider exposes whatever chat models OVH AI Endpoints returns for your acco
 
 - **Base URL**: `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1`
 - **Auth**: Bearer token via `OVH_AI_TOKEN`
-- **API type**: `openai-completions` (default) or `openai-responses` via `OVH_AI_API`
+- **API type**: `openai-responses` (default) or `openai-completions` via `OVH_AI_API`
 
 ### Using the Responses API
 

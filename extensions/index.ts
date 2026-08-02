@@ -38,7 +38,7 @@ const DEFAULT_BASE_URL = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1";
 const BASE_URL = process.env.OVH_AI_BASE_URL ?? DEFAULT_BASE_URL;
 
 /** Default API type for OVH AI Endpoints. */
-const DEFAULT_API_TYPE: Api = "openai-completions";
+const DEFAULT_API_TYPE: Api = "openai-responses";
 
 /** Allowed API type values for OVH_AI_API. */
 const ALLOWED_API_TYPES: readonly Api[] = ["openai-completions", "openai-responses"];
