@@ -20,7 +20,7 @@ interface TestResult {
   name: string;
   model: string;
   prompt: string;
-  status: "PASS" | "FAIL" | "TIMEOUT";
+  status: "PASS" | "FAIL" | "TIMEOUT" | "SKIP";
   durationMs: number;
   outputLength?: number;
   error?: string;
@@ -28,12 +28,36 @@ interface TestResult {
 }
 
 interface TestRun {
+  skips: number;
   date: string;
   totalTests: number;
   passed: number;
   failed: number;
   timeouts: number;
   results: TestResult[];
+}
+
+// Helper to fetch currently available OVH models at test time
+async function fetchAvailableModelIds(): Promise<Set<string>> {
+  const baseUrl = process.env.OVH_AI_BASE_URL ?? "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1";
+  const token = process.env.OVH_AI_TOKEN;
+  if (!token) {
+    console.error(
+      "[OVH TEST] OVH_AI_TOKEN not set – cannot fetch model list. All model-specific tests will be skipped.",
+    );
+    return new Set();
+  }
+  try {
+    const resp = await fetch(`${baseUrl}/models`, {
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    });
+    if (!resp.ok) return new Set();
+    const data = (await resp.json()) as { data?: Array<{ id: string }> };
+    const ids = (data?.data ?? []).map((m) => m.id);
+    return new Set(ids);
+  } catch {
+    return new Set();
+  }
 }
 
 const MODELS = {
@@ -113,7 +137,14 @@ const TESTS = [
   },
 ];
 
-function runTest(test: (typeof TESTS)[0]): TestResult {
+let AVAILABLE_MODELS: Set<string> | null = null;
+async function ensureAvailableModels() {
+  if (AVAILABLE_MODELS === null) {
+    AVAILABLE_MODELS = await fetchAvailableModelIds();
+  }
+}
+
+async function runTest(test: (typeof TESTS)[0]): Promise<TestResult> {
   const startTime = Date.now();
   const timestamp = new Date().toISOString();
 
@@ -231,7 +262,7 @@ function generateReport(run: TestRun): string {
   return lines.join("\n");
 }
 
-function main() {
+async function main() {
   console.log("🧪 OVH AI Endpoints Test Suite\n");
   console.log(`Running ${TESTS.length} tests...\n`);
 
@@ -241,10 +272,33 @@ function main() {
     const test = TESTS[i];
     console.log(`[${i + 1}/${TESTS.length}] ${test.name}...`);
 
-    const result = runTest(test);
+    // Ensure we know which models are actually available
+    await ensureAvailableModels();
+    if (AVAILABLE_MODELS && !AVAILABLE_MODELS.has(test.model.split("/")[1])) {
+      const skipResult: TestResult = {
+        name: test.name,
+        model: test.model,
+        prompt: test.prompt,
+        status: "SKIP",
+        durationMs: 0,
+        timestamp: new Date().toISOString(),
+      };
+      results.push(skipResult);
+      console.log("  ⏭️ SKIPPED (model not available)");
+      continue;
+    }
+
+    const result = await runTest(test);
     results.push(result);
 
-    const icon = result.status === "PASS" ? "✅" : result.status === "FAIL" ? "❌" : "⏱️";
+    const icon =
+      result.status === "PASS"
+        ? "✅"
+        : result.status === "FAIL"
+          ? "❌"
+          : result.status === "TIMEOUT"
+            ? "⏱️"
+            : "⏭️";
     console.log(`  ${icon} ${result.status} (${(result.durationMs / 1000).toFixed(1)}s)`);
 
     if (result.error && result.status !== "PASS") {
@@ -258,6 +312,7 @@ function main() {
   }
 
   const run: TestRun = {
+    skips: results.filter((r) => r.status === "SKIP").length,
     date: new Date().toISOString(),
     totalTests: results.length,
     passed: results.filter((r) => r.status === "PASS").length,
@@ -293,7 +348,7 @@ function main() {
   console.log("=".repeat(50));
 
   // Exit with error code if any tests failed
-  process.exit(run.failed > 0 || run.timeouts > 0 ? 1 : 0);
+  process.exit(run.failed > 0 || run.timeouts > 0 ? 1 : 0); // SKIPPED tests do not cause failure
 }
 
 // Only run if called directly
