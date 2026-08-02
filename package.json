@@ -16,13 +16,9 @@
   ],
   "files": [
     "extensions",
-    "skills",
-    "prompts",
-    "themes",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE",
-    "!.github"
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public"
