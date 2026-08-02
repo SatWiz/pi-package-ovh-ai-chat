@@ -60,9 +60,12 @@ async function fetchAvailableModelIds(): Promise<Set<string>> {
   }
 }
 
+// NOTE: test models must support the OpenAI Responses API (the provider default).
+// OVH's Mistral models only serve /v1/chat/completions (404 on /v1/responses),
+// so gpt-oss and Qwen models are used here instead.
 const MODELS = {
-  fast: "ovhai/Mistral-7B-Instruct-v0.3",
-  balanced: "ovhai/Mistral-Small-3.2-24B-Instruct-2506",
+  fast: "ovhai/gpt-oss-20b",
+  balanced: "ovhai/Qwen3.6-27B",
   large: "ovhai/Meta-Llama-3_3-70B-Instruct",
   reasoning: "ovhai/gpt-oss-120b",
   fastReasoning: "ovhai/gpt-oss-20b",
